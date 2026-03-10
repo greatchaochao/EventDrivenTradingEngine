@@ -1,5 +1,7 @@
 #include "engine.h"
+#include "strategy.h" // 引入信号计算函数 computeSignal 和 Signal 枚举
 #include <chrono>
+#include <fstream> // std::ofstream — 用于写入 CSV 日志文件
 #include <iostream>
 #include <thread>
 
@@ -24,6 +26,18 @@ void runEngine(const std::vector<Tick> &ticks) {
   // 外层循环：数据播完后自动重头开始，模拟持续运行的实时行情
   while (true) {
     std::cout << "--- 第 " << cycle << " 轮 ---" << std::endl;
+
+    // ── 每轮开始时创建（或覆盖）信号日志文件 ──────────────
+    // std::ofstream 以写入模式打开文件；若文件已存在则从头覆盖
+    // 变量 csv 在本轮 while
+    // 循环体结束时自动关闭（RAII：资源随对象生命周期释放）
+    std::ofstream csv("data/signals.csv");
+    csv << "Date,Price,Signal\n"; // 写入 CSV 表头（第一行）
+
+    // ── 价格历史缓冲区，每轮循环重置 ────────────────────
+    // priceHistory 存储截至当前 tick 的所有收盘价（按时间顺序）
+    // computeSignal 需要读取这段历史才能计算短期和长期均线
+    std::vector<double> priceHistory;
 
     double prevPrice = ticks[0].price; // 记录上一个 Tick 的价格，用于比较涨跌
 
@@ -71,8 +85,32 @@ void runEngine(const std::vector<Tick> &ticks) {
       else
         direction = "FLAT"; // 价格不变
 
-      std::cout << ticks[i].date << "  " << direction << "  price: " << price
-                << std::endl;
+      // ── 将本 tick 的价格追加进历史缓冲区 ──────────────
+      // 追加后 priceHistory 包含从第 1 天到当前日的所有价格
+      priceHistory.push_back(price);
+
+      // ── 计算当前 tick 的交易信号 ───────────────────────
+      // computeSignal 内部会检查 priceHistory 的长度：
+      //   - 不足 20 条 → 返回 HOLD（长期均线数据不够）
+      //   - 满 20 条以上 → 比较短期(5日)与长期(20日)均线是否发生交叉
+      Signal sig = computeSignal(priceHistory);
+
+      // ── 将 Signal 枚举转换为可打印的字符串 ─────────────
+      // "BUY " 刻意加一个空格，与 "SELL" / "----" 对齐，便于终端阅读
+      std::string sigStr;
+      if (sig == Signal::BUY)
+        sigStr = "BUY ";
+      else if (sig == Signal::SELL)
+        sigStr = "SELL";
+      else
+        sigStr = "----";
+
+      std::cout << ticks[i].date << "  " << direction << "  " << sigStr
+                << "  price: " << price << std::endl;
+
+      // ── 将本行数据写入 CSV 日志 ───────────────────────
+      // 格式：日期,价格,信号   （无空格，符合标准 CSV 规范）
+      csv << ticks[i].date << "," << price << "," << sigStr << "\n";
 
       prevPrice = price; // 更新上一条价格，供下一次循环使用
 
@@ -90,7 +128,9 @@ void runEngine(const std::vector<Tick> &ticks) {
     }
 
     std::cout << std::endl;
-    std::cout << "数据播放完毕，重新开始..." << std::endl;
+    // csv 在此离开作用域，ofstream 析构函数自动 flush 并关闭文件
+    std::cout << "数据播放完毕。信号日志已写入 data/signals.csv。重新开始..."
+              << std::endl;
     std::cout << std::endl;
 
     // ++ 是「自增运算符」，专门用来把一个整数加 1

@@ -8,6 +8,7 @@ add_executable(engine
     src/engine.cpp
     src/strategy.cpp
     src/portfolio.cpp
+    src/risk.cpp
 )
 target_include_directories(engine PRIVATE src)
 

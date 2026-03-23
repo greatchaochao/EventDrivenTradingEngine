@@ -1,6 +1,7 @@
 #include "engine.h"
-#include "portfolio.h" // 新增：引入投资组合模块（Week 5）
-#include "strategy.h"  // 引入信号计算函数 computeSignal 和 Signal 枚举
+#include "portfolio.h" // 投资组合模块（Week 5）
+#include "risk.h"      // 新增：风控模块（Week 6）
+#include "strategy.h"  // 信号计算模块（Week 4）
 #include <chrono>
 #include <fstream> // std::ofstream — 用于写入 CSV 日志文件
 #include <iostream>
@@ -28,9 +29,10 @@ void runEngine(const std::vector<Tick> &ticks) {
   while (true) {
     std::cout << "--- 第 " << cycle << " 轮 ---" << std::endl;
 
-    // ── 每轮开始时初始化账户 ──────────────────────────
-    // 初始资金设为 10000，每轮重置，便于重复回测
+    // ── 每轮开始时初始化账户与风控 ────────────────────
+    // 两个模块使用相同的初始资金，保持数值一致
     Portfolio portfolio = createPortfolio(10000.0);
+    RiskManager rm = createRiskManager(10000.0); // Week 6 新增
 
     // ── 每轮开始时创建（或覆盖）日志文件 ──────────────
     // std::ofstream 以写入模式打开文件；若文件已存在则从头覆盖
@@ -40,7 +42,8 @@ void runEngine(const std::vector<Tick> &ticks) {
     std::ofstream tradeCsv("data/trades.csv");
 
     // 写入 CSV 表头（第一行）
-    sigCsv << "Date,Price,Signal,NetValue\n";
+    // signals.csv 新增 Drawdown 列，供 Week 7 绘制回撤曲线
+    sigCsv << "Date,Price,Signal,NetValue,Drawdown\n";
     tradeCsv << "Date,Action,Price,Quantity,Commission,CashAfter\n";
 
     // ── 价格历史缓冲区，每轮循环重置 ────────────────────
@@ -53,6 +56,7 @@ void runEngine(const std::vector<Tick> &ticks) {
     // 内层循环：逐条处理每一笔行情数据
     for (int i = 0; i < (int)ticks.size(); i++) {
       double price = ticks[i].price;
+      std::string date = ticks[i].date;
 
       // ── 方向判断（沿用 Week 3 的逻辑）──────────────
       std::string direction;
@@ -78,39 +82,65 @@ void runEngine(const std::vector<Tick> &ticks) {
       else
         sigStr = "----";
 
-      // ── 订单执行（Week 5 新增）──────────────────────
-      // executeBuy / executeSell 会修改 portfolio 的内部状态
-      // 它们返回 true 表示本次成交成功，false 表示忽略（无持仓可卖 / 已有持仓）
-      if (sig == Signal::BUY) {
-        bool traded = executeBuy(portfolio, ticks[i].date, price);
-        if (traded) {
-          std::cout << "  [买入成交] " << portfolio.tradeLog.back().quantity
-                    << " 股 @ " << price
-                    << "  手续费: " << portfolio.tradeLog.back().commission
-                    << "  剩余现金: " << portfolio.cash << std::endl;
+      // ── 订单执行（含熔断保护，Week 6 新增）────────────
+      //
+      // 熔断时的两条规则：
+      //   规则 1 — 禁止开新仓（跳过 BUY 信号）
+      //   规则 2 — 强制平仓（若有持仓，立即执行卖出）
+      //
+      // 为什么只拦 BUY 而不拦 SELL？
+      //   熔断的目的是"止损"，允许卖出可以及时关闭亏损头寸
+      //   禁止买入是为了防止在下跌趋势中继续加仓，扩大损失
+      if (rm.halted) {
+        // 规则 2：如果熔断时仍有持仓，强制卖出
+        if (portfolio.position > 0) {
+          bool sold = executeSell(portfolio, date, price);
+          if (sold) {
+            std::cout << "  [强制平仓] " << date << "  卖出 "
+                      << portfolio.tradeLog.back().quantity << " 股 @ " << price
+                      << std::endl;
+          }
         }
-      } else if (sig == Signal::SELL) {
-        bool traded = executeSell(portfolio, ticks[i].date, price);
-        if (traded) {
-          std::cout << "  [卖出成交] " << portfolio.tradeLog.back().quantity
-                    << " 股 @ " << price
-                    << "  手续费: " << portfolio.tradeLog.back().commission
-                    << "  剩余现金: " << portfolio.cash << std::endl;
+        // 规则 1：熔断状态下不执行任何 BUY 信号，直接跳到净值计算
+      } else {
+        // 正常状态：按信号执行
+        if (sig == Signal::BUY) {
+          bool traded = executeBuy(portfolio, date, price);
+          if (traded) {
+            std::cout << "  [买入成交] " << portfolio.tradeLog.back().quantity
+                      << " 股 @ " << price
+                      << "  手续费: " << portfolio.tradeLog.back().commission
+                      << "  剩余现金: " << portfolio.cash << std::endl;
+          }
+        } else if (sig == Signal::SELL) {
+          bool traded = executeSell(portfolio, date, price);
+          if (traded) {
+            std::cout << "  [卖出成交] " << portfolio.tradeLog.back().quantity
+                      << " 股 @ " << price
+                      << "  手续费: " << portfolio.tradeLog.back().commission
+                      << "  剩余现金: " << portfolio.cash << std::endl;
+          }
         }
       }
 
-      // ── 计算并打印当前账户净值 ───────────────────────
+      // ── 计算当前账户净值 ─────────────────────────────
       // getNetValue = 现金 + 持仓 × 当前价格
       double netValue = getNetValue(portfolio, price);
 
-      std::cout << ticks[i].date << "  " << direction << "  " << sigStr
-                << "  price: " << price << "  net_value: " << netValue
-                << std::endl;
+      // ── 更新风控状态（Week 6 新增）───────────────────
+      // 必须在计算 netValue 之后调用，才能传入最新净值
+      // updateRisk 内部会：更新峰值、计算回撤、检查熔断条件
+      updateRisk(rm, netValue, date);
 
-      // ── 将本行数据写入信号日志 ────────────────────────
-      // signals.csv 新增了 NetValue 列，供 Week 7 绘制净值曲线
-      sigCsv << ticks[i].date << "," << price << "," << sigStr << ","
-             << netValue << "\n";
+      // ── 终端输出 ─────────────────────────────────────
+      std::cout << date << "  " << direction << "  " << sigStr
+                << "  price: " << price << "  net_value: " << netValue
+                << "  drawdown: " << rm.drawdown * 100.0 << "%"
+                << (rm.halted ? "  [熔断中]" : "") << std::endl;
+
+      // ── 将本行数据写入信号日志（含新的 Drawdown 列）──
+      sigCsv << date << "," << price << "," << sigStr << "," << netValue << ","
+             << rm.drawdown << "\n";
 
       prevPrice = price; // 更新上一条价格
 
@@ -145,6 +175,11 @@ void runEngine(const std::vector<Tick> &ticks) {
     double finalNetValue = getNetValue(portfolio, ticks.back().price);
     std::cout << "最终总价值: " << finalNetValue
               << "  盈亏: " << (finalNetValue - 10000.0) << std::endl;
+
+    // Week 6 新增：打印风控摘要
+    std::cout << "历史最大回撤: " << rm.maxDrawdown * 100.0 << "%"
+              << (rm.halted ? "  （本轮已触发熔断）" : "  （本轮未触发熔断）")
+              << std::endl;
 
     std::cout << std::endl;
     std::cout << "数据播放完毕。日志已写入 data/signals.csv 和 "

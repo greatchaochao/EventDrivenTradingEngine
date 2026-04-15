@@ -1,10 +1,9 @@
 {
   "image": "mcr.microsoft.com/devcontainers/cpp:latest",
   // postCreateCommand 在 Codespace 首次创建后自动执行一次
-  // 第一步：用 apt-get 安装 python3-pip（容器自带 Python 但没有 pip）
-  // 第二步：用 pip 安装绘图依赖
-  // 这比安装整个 pyenv/Python feature 快得多（几秒 vs 几分钟）
-  "postCreateCommand": "sudo apt-get install -y python3-pip --quiet && python3 -m pip install pandas matplotlib --quiet --break-system-packages",
+  // ensurepip 是 Python 内置模块，无需 apt 即可为当前解释器安装 pip
+  // 完全不依赖系统包管理器，速度快且不受 apt 源限制
+  "postCreateCommand": "python3 -m ensurepip --upgrade && python3 -m pip install pandas matplotlib --quiet --break-system-packages",
   "customizations": {
     "vscode": {
       "extensions": [

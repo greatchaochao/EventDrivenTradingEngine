@@ -13,6 +13,12 @@
 
 # ── import 语句 ────────────────────────────────────────────────────────────
 # 相当于 C++ 的 #include，告诉 Python "我要用这些外部库"
+import matplotlib                        # 先导入主模块，再设置后端
+# 必须在 import pyplot 之前调用 matplotlib.use()
+# 'Agg'（Anti-Grain Geometry）是纯软件渲染后端，不需要显示器
+# GitHub Codespaces / 服务器环境没有图形界面，需要显式指定此后端
+# 本地有显示器时 Agg 同样有效，只是无法弹出交互式窗口（但我们只保存文件，不需要弹窗）
+matplotlib.use('Agg')
 import pandas as pd                      # pandas：表格数据处理（类似 Excel 的 Python 版）
 import matplotlib.pyplot as plt          # matplotlib：绘图库，plt 是约定俗成的别名
 import matplotlib.dates as mdates        # 处理 X 轴上的日期显示格式

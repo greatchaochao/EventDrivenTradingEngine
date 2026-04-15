@@ -3,7 +3,7 @@
   // postCreateCommand 在 Codespace 首次创建后自动执行一次
   // pip install 安装 Python 可视化依赖（pandas + matplotlib）
   // 安装完成后学生无需手动执行任何 pip 命令，直接运行 python3 scripts/report.py 即可
-  "postCreateCommand": "python3 -m pip install pandas matplotlib --quiet",
+  "postCreateCommand": "python3.13 -m pip install pandas matplotlib --quiet --break-system-packages",
   "customizations": {
     "vscode": {
       "extensions": [

@@ -1,9 +1,16 @@
 {
   "image": "mcr.microsoft.com/devcontainers/cpp:latest",
+  // features：在基础镜像之上按需叠加功能
+  // 这里使用官方 Python feature，它通过 pyenv 安装 Python 并自动配置 pip
+  // 这是 devcontainer 官方推荐的方式，比手动 apt-get install 更稳定
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": {
+      "version": "3.12"
+    }
+  },
   // postCreateCommand 在 Codespace 首次创建后自动执行一次
-  // pip install 安装 Python 可视化依赖（pandas + matplotlib）
-  // 安装完成后学生无需手动执行任何 pip 命令，直接运行 python3 scripts/report.py 即可
-  "postCreateCommand": "python3.13 -m pip install pandas matplotlib --quiet --break-system-packages",
+  // feature 安装的 Python 已包含 pip，可直接使用，无需 --break-system-packages
+  "postCreateCommand": "pip install pandas matplotlib --quiet",
   "customizations": {
     "vscode": {
       "extensions": [
